@@ -139,7 +139,7 @@ remove_component() {
   if ! component_detected "$detect"; then info "$label не обнаружен; пропуск."; return 0; fi
   step "Удаление компонента: $label"
   case "$detect" in
-    podkop|forkop|awg|zapret|zapret2|podkop-vpn-failover|luci-app-site-checker)
+    podkop|forkop|awg|zapret|zapret2|zapret2-classic|podkop-vpn-failover|luci-app-site-checker)
       cleanup_artifacts "$detect"
       ;;
   esac
@@ -149,7 +149,7 @@ remove_component() {
   fi
   # Clean component artefacts again in case package removal recreated service/config paths.
   case "$detect" in
-    podkop|forkop|awg|zapret|zapret2|podkop-vpn-failover|luci-app-site-checker)
+    podkop|forkop|awg|zapret|zapret2|zapret2-classic|podkop-vpn-failover|luci-app-site-checker)
       cleanup_artifacts "$detect"
       ;;
   esac
