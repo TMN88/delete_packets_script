@@ -201,16 +201,15 @@ FAILS=0
 REMOVED=0
 while IFS= read -r package; do
   [ -n "$package" ] || continue
+  REBOOT_CANDIDATE=0
   case "$package" in
-    # Certain packages restart low-level networking/services poorly when removed.
-    # These do not always require a reboot, so the prompt is conditional on actual removal.
+    kmod-*) REBOOT_CANDIDATE=1 ;;
     wpad-*|hostapd|netifd|firewall4|firewall3|odhcpd-ipv6only|odhcpd|dnsmasq|procd|busybox|base-files|libc|libgcc)
       REBOOT_CANDIDATE=1 ;;
-    *) REBOOT_CANDIDATE=0 ;;
   esac
   if remove_one "$package"; then
     REMOVED=$((REMOVED + 1))
-    [ "${REBOOT_CANDIDATE:-0}" != 1 ] || NEED_REBOOT=1
+    [ "$REBOOT_CANDIDATE" != 1 ] || NEED_REBOOT=1
   else
     rc=$?; [ "$rc" -eq 2 ] || FAILS=$((FAILS + 1))
   fi
