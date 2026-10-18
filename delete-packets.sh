@@ -34,7 +34,7 @@ KEEP_EXACT='base-files busybox ca-bundle dnsmasq dropbear firewall4 fstools fwto
 is_protected() {
   p="$1"
   for k in $KEEP_EXACT; do [ "$p" = "$k" ] && return 0; done
-  case "$p" in kernel*|kmod-*) return 0 ;; esac
+  case "$p" in kernel*|kmod-*|libubox*|libubus*|libuci*|libblobmsg-json*|libjson-c*|libjson-script*|libubus-lua*) return 0 ;; esac
   return 1
 }
 
