@@ -57,7 +57,7 @@ component_detected() {
     awg) pkg_installed amneziawg-tools || pkg_installed kmod-amneziawg || pkg_installed amneziawg || pkg_installed luci-proto-amneziawg || command -v awg >/dev/null 2>&1 || [ -x /etc/init.d/amneziawg ] ;;
     zapret) pkg_installed luci-app-zapret || pkg_installed zapret || pkg_installed zapret-manager || [ -f /etc/config/zapret ] || [ -x /etc/init.d/zapret ] ;;
     zapret2) pkg_installed zapret2 || pkg_installed luci-app-zapret2 || [ -f /etc/config/zapret2 ] || [ -x /etc/init.d/zapret2 ] || [ -x /opt/zapret2/init.d/openwrt/zapret2 ] ;;
-    zapret2-classic) [ -x /opt/zapret2/install_easy.sh ] || [ -x /opt/zapret2/init.d/openwrt/zapret2 ] || [ -x /etc/init.d/zapret2 ] || [ -d /opt/zapret2/common ] ;;
+    zapret2-classic) [ -x /opt/zapret2/install_easy.sh ] || [ -d /opt/zapret2/common ] ;;
     podkop-vpn-failover) [ -x /usr/bin/podkop-vpn-failover ] || [ -x /usr/bin/podkop-vpn-failover-control ] || [ -x /etc/init.d/podkop-vpn-failover ] || [ -x /usr/bin/awg-test ] || [ -x /etc/init.d/awg-test ] ;;
     luci-app-site-checker) pkg_installed luci-app-site-checker || pkg_installed site-checker || [ -f /usr/lib/lua/luci/controller/sitecheck.lua ] || [ -f /usr/lib/lua/luci/controller/site_checker.lua ] || [ -f /usr/lib/lua/luci/view/sitecheck/index.htm ] || [ -f /usr/libexec/sitecheck-check ] || [ -f /usr/libexec/sitecheck-check-zapret ] || [ -f /usr/libexec/sitecheck-system-sites ] || [ -f /usr/share/luci/menu.d/luci-app-site-checker.json ] || [ -f /etc/config/sitecheck ] ;;
     luci-ru) pkg_installed luci-i18n-base-ru ;;
@@ -91,11 +91,11 @@ cleanup_artifacts() {
       /etc/init.d/zapret2 stop >/dev/null 2>&1 || true
       /etc/init.d/zapret2 disable >/dev/null 2>&1 || true
       rm -f /etc/init.d/zapret2 /etc/config/zapret2
-      # Leave /opt/zapret2 alone; a manually installed classic version may be there.
+      # Remove only the package-based Routerich files; never wipe /opt/zapret2 here.
       ;;
     zapret2-classic)
-      /etc/init.d/zapret2 stop >/dev/null 2>&1 || true
-      /etc/init.d/zapret2 disable >/dev/null 2>&1 || true
+      /opt/zapret2/init.d/openwrt/zapret2 stop >/dev/null 2>&1 || true
+      /opt/zapret2/init.d/openwrt/zapret2 disable >/dev/null 2>&1 || true
       rm -f /etc/init.d/zapret2
       # Explicitly selected classic install only: package manager is not responsible for /opt/zapret2.
       printf 'Удалить каталог /opt/zapret2, включая его конфигурацию? [y/N]: '
