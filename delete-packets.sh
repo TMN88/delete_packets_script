@@ -26,7 +26,7 @@ elif command -v opkg >/dev/null 2>&1; then PM=opkg
 else err 'Не найден пакетный менеджер apk/opkg.'; exit 1; fi
 
 MODEL="$(cat /tmp/sysinfo/model 2>/dev/null || printf 'неизвестна')"
-RELEASE="$(awk -F\"'\" '/^DISTRIB_RELEASE=/ {print $2; exit}' /etc/openwrt_release 2>/dev/null)"
+RELEASE="$(sed -n \"s/^DISTRIB_RELEASE='\\([^']*\\)'.*/\\1/p\" /etc/openwrt_release | head -n 1)"
 
 # Conservative protection: core packages, language package, kernel and all kmods
 # are never eligible for selection, including the REMOVE ALL option.
