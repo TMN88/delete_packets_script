@@ -1,9 +1,9 @@
 #!/bin/sh
-# Packets Delete — interactive package removal and cleanup tool for OpenWrt.
+# Packets Delete — remove only components offered by TMN88/install_packets_script.
 # BusyBox ash compatible; supports apk (OpenWrt 25.12+) and opkg (OpenWrt 24.10).
 set -u
 
-VERSION="1.0"
+VERSION="1.1"
 TMP_DIR="/tmp/delete-packets-$$"
 mkdir -p "$TMP_DIR" || exit 1
 trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
@@ -26,33 +26,47 @@ elif command -v opkg >/dev/null 2>&1; then PM=opkg
 else err 'Не найден пакетный менеджер apk/opkg.'; exit 1; fi
 
 MODEL="$(cat /tmp/sysinfo/model 2>/dev/null || printf 'неизвестна')"
-RELEASE="$(sed -n \"s/^DISTRIB_RELEASE='\\([^']*\\)'.*/\\1/p\" /etc/openwrt_release | head -n 1)"
+RELEASE="$(sed -n "s/^DISTRIB_RELEASE='\([^']*\)'.*/\1/p" /etc/openwrt_release | head -n 1)"
 
-# Conservative protection: core packages, language package, kernel and all kmods
-# are never eligible for selection, including the REMOVE ALL option.
-KEEP_EXACT='base-files busybox ca-bundle dnsmasq dropbear firewall4 fstools fwtool libc libgcc libubox libubus logd mtd netifd opkg apk procd procd-seccomp rpcd uci uclient-fetch urandom-seed urngd wpad-basic-mbedtls wpad-basic-openssl wpad-mbedtls wpad-openssl luci luci-base luci-light luci-i18n-base-ru'
-is_protected() {
-  p="$1"
-  for k in $KEEP_EXACT; do [ "$p" = "$k" ] && return 0; done
-  case "$p" in kernel*|kmod-*|libubox*|libubus*|libuci*|libblobmsg-json*|libjson-c*|libjson-script*|libubus-lua*) return 0 ;; esac
-  return 1
-}
+# Only components explicitly offered by install_packets_script are candidates.
+# Each component has package names and/or installer-created files used for detection.
+COMPONENTS_FILE="$TMP_DIR/components.tsv"
+cat > "$COMPONENTS_FILE" <<'COMPONENTS'
+Podkop	podkop	podkop
+Forkop	forkop	forkop
+AmneziaWG	amneziawg-tools kmod-amneziawg amneziawg luci-proto-amneziawg	awg
+Zapret Manager	zapret-manager luci-app-zapret zapret	zapret
+Zapret2 Routerich	zapret2 luci-app-zapret2 luci-i18n-zapret2-ru	zapret2
+Zapret2 classic (manual install)		zapret2-classic
+AWG Test / Podkop VPN Failover		podkop-vpn-failover
+Site Checker	luci-app-site-checker site-checker	luci-app-site-checker
+Русская локализация LuCI	luci-i18n-base-ru	luci-ru
+USB modules	kmod-usb-core kmod-usb-storage kmod-usb3 kmod-usb2 kmod-usb-xhci-hcd kmod-usb-xhci-mtk kmod-usb-dwc3	usb-modules
+COMPONENTS
 
-list_installed() {
-  if [ "$PM" = apk ]; then apk info 2>/dev/null | sed '/^[[:space:]]*$/d' | sort -u
-  else opkg list-installed 2>/dev/null | awk '{print $1}' | sort -u; fi
-}
 pkg_installed() {
-  if [ "$PM" = apk ]; then apk info -e "$1" >/dev/null 2>&1
-  else opkg list-installed 2>/dev/null | grep -q "^$1 "; fi
+  p="$1"
+  [ -n "$p" ] || return 1
+  if [ "$PM" = apk ]; then apk info -e "$p" >/dev/null 2>&1
+  else opkg list-installed 2>/dev/null | grep -Fq "$p -"; fi
 }
-pkg_description() {
-  if [ "$PM" = apk ]; then apk info -d "$1" 2>/dev/null | sed -n '2p' | tr '\n\r\t' '   ' | cut -c1-60
-  else opkg info "$1" 2>/dev/null | sed -n 's/^Description: //p' | head -n 1 | tr '\n\r\t' '   ' | cut -c1-60; fi
+component_detected() {
+  case "$1" in
+    podkop) pkg_installed podkop || [ -x /etc/init.d/podkop ] || [ -f /etc/config/podkop ] ;;
+    forkop) pkg_installed forkop || [ -x /etc/init.d/forkop ] || [ -f /etc/config/forkop ] ;;
+    awg) pkg_installed amneziawg-tools || pkg_installed kmod-amneziawg || pkg_installed amneziawg || pkg_installed luci-proto-amneziawg || command -v awg >/dev/null 2>&1 || [ -x /etc/init.d/amneziawg ] ;;
+    zapret) pkg_installed luci-app-zapret || pkg_installed zapret || pkg_installed zapret-manager || [ -f /etc/config/zapret ] || [ -x /etc/init.d/zapret ] ;;
+    zapret2) pkg_installed zapret2 || pkg_installed luci-app-zapret2 || [ -f /etc/config/zapret2 ] || [ -x /etc/init.d/zapret2 ] || [ -x /opt/zapret2/init.d/openwrt/zapret2 ] ;;
+    zapret2-classic) [ -x /opt/zapret2/install_easy.sh ] || [ -x /opt/zapret2/init.d/openwrt/zapret2 ] || [ -x /etc/init.d/zapret2 ] || [ -d /opt/zapret2/common ] ;;
+    podkop-vpn-failover) [ -x /usr/bin/podkop-vpn-failover ] || [ -x /usr/bin/podkop-vpn-failover-control ] || [ -x /etc/init.d/podkop-vpn-failover ] || [ -x /usr/bin/awg-test ] || [ -x /etc/init.d/awg-test ] ;;
+    luci-app-site-checker) pkg_installed luci-app-site-checker || pkg_installed site-checker || [ -f /usr/lib/lua/luci/controller/sitecheck.lua ] || [ -f /usr/lib/lua/luci/controller/site_checker.lua ] || [ -f /usr/lib/lua/luci/view/sitecheck/index.htm ] || [ -f /usr/libexec/sitecheck-check ] || [ -f /usr/libexec/sitecheck-check-zapret ] || [ -f /usr/libexec/sitecheck-system-sites ] || [ -f /usr/share/luci/menu.d/luci-app-site-checker.json ] || [ -f /etc/config/sitecheck ] ;;
+    luci-ru) pkg_installed luci-i18n-base-ru ;;
+    usb-modules) pkg_installed kmod-usb-core && pkg_installed kmod-usb-storage && { pkg_installed kmod-usb3 || pkg_installed kmod-usb2 || pkg_installed kmod-usb-xhci-hcd || pkg_installed kmod-usb-xhci-mtk || pkg_installed kmod-usb-dwc3; } ;;
+    *) return 1 ;;
+  esac
 }
 
-# Stop/remove service files and configuration only for recognized add-on packages.
-# Unknown package-owned files are left to apk/opkg; never blanket-delete /etc or /overlay.
+# Component-specific non-package files. Never delete broad system directories or all /opt.
 cleanup_artifacts() {
   case "$1" in
     podkop)
@@ -67,30 +81,28 @@ cleanup_artifacts() {
       rm -f /etc/init.d/forkop /etc/config/forkop
       rm -rf /usr/share/forkop /usr/lib/python*/site-packages/forkop
       ;;
-    zapret|zapret-manager|luci-app-zapret)
+    zapret)
       /etc/init.d/zapret stop >/dev/null 2>&1 || true
       /etc/init.d/zapret disable >/dev/null 2>&1 || true
       rm -f /etc/init.d/zapret /etc/config/zapret
-      rm -rf /opt/zapret /usr/share/zapret /usr/lib/zapret
+      rm -rf /usr/share/zapret /usr/lib/zapret
       ;;
-    zapret2|luci-app-zapret2)
+    zapret2)
       /etc/init.d/zapret2 stop >/dev/null 2>&1 || true
       /etc/init.d/zapret2 disable >/dev/null 2>&1 || true
       rm -f /etc/init.d/zapret2 /etc/config/zapret2
-      rm -rf /opt/zapret2
+      # Leave /opt/zapret2 alone; a manually installed classic version may be there.
       ;;
-    amneziawg|amneziawg-tools|luci-proto-amneziawg)
-      /etc/init.d/amneziawg stop >/dev/null 2>&1 || true
-      /etc/init.d/amneziawg disable >/dev/null 2>&1 || true
-      rm -f /etc/init.d/amneziawg
+    zapret2-classic)
+      /etc/init.d/zapret2 stop >/dev/null 2>&1 || true
+      /etc/init.d/zapret2 disable >/dev/null 2>&1 || true
+      rm -f /etc/init.d/zapret2
+      # Explicitly selected classic install only: package manager is not responsible for /opt/zapret2.
+      printf 'Удалить каталог /opt/zapret2, включая его конфигурацию? [y/N]: '
+      IFS= read -r CONF_OPT || CONF_OPT=''
+      case "$CONF_OPT" in y|Y|yes|YES|д|Д|да|ДА) rm -rf /opt/zapret2 ;; *) info 'Каталог /opt/zapret2 оставлен без изменений.' ;; esac
       ;;
-    luci-app-site-checker|site-checker|luci-app-site_checker)
-      rm -f /usr/lib/lua/luci/controller/sitecheck.lua /usr/lib/lua/luci/controller/site_checker.lua
-      rm -f /usr/lib/lua/luci/view/sitecheck/index.htm /usr/libexec/sitecheck-check /usr/libexec/sitecheck-check-zapret /usr/libexec/sitecheck-system-sites
-      rm -f /usr/share/luci/menu.d/luci-app-site-checker.json /etc/config/sitecheck
-      rm -rf /usr/share/site-checker
-      ;;
-    podkop-vpn-failover|vpn-failover|awg-test)
+    podkop-vpn-failover)
       /etc/init.d/podkop-vpn-failover stop >/dev/null 2>&1 || true
       /etc/init.d/podkop-vpn-failover disable >/dev/null 2>&1 || true
       /etc/init.d/awg-test stop >/dev/null 2>&1 || true
@@ -99,31 +111,49 @@ cleanup_artifacts() {
       rm -f /usr/bin/podkop-vpn-failover /usr/bin/podkop-vpn-failover-control /usr/bin/awg-test
       rm -rf /usr/share/podkop-vpn-failover
       ;;
+    luci-app-site-checker)
+      rm -f /usr/lib/lua/luci/controller/sitecheck.lua /usr/lib/lua/luci/controller/site_checker.lua
+      rm -f /usr/lib/lua/luci/view/sitecheck/index.htm /usr/libexec/sitecheck-check /usr/libexec/sitecheck-check-zapret /usr/libexec/sitecheck-system-sites
+      rm -f /usr/share/luci/menu.d/luci-app-site-checker.json /etc/config/sitecheck
+      rm -rf /usr/share/site-checker
+      ;;
   esac
 }
 
-cleanup_package_caches() {
-  if [ "$PM" = apk ]; then
-    apk cache clean >/dev/null 2>&1 || true
-    rm -rf /var/cache/apk/* 2>/dev/null || true
-  else
-    rm -rf /tmp/opkg-lists/* 2>/dev/null || true
-    rm -f /tmp/opkg-*.ipk 2>/dev/null || true
-  fi
-  rm -f /tmp/*.apk 2>/dev/null || true
+component_remove_packages() {
+  component="$1"; packages="$2"
+  # Remove only package names associated with the selected component. Never use --autoremove.
+  for p in $packages; do
+    if pkg_installed "$p"; then
+      step "Удаление пакета $p"
+      if [ "$PM" = apk ]; then apk del "$p"; else opkg remove "$p"; fi
+      rc=$?
+      if [ "$rc" -ne 0 ]; then warn "Не удалось удалить $p (код $rc)."; return 1; fi
+    fi
+  done
+  return 0
 }
 
-remove_one() {
-  p="$1"
-  if is_protected "$p"; then warn "Защищён системный пакет, пропуск: $p"; return 2; fi
-  if ! pkg_installed "$p"; then info "Пакет уже отсутствует: $p"; return 0; fi
-  step "Удаление $p"
-  cleanup_artifacts "$p"
-  if [ "$PM" = apk ]; then apk del "$p"; else opkg remove "$p"; fi
-  rc=$?
-  if [ "$rc" -ne 0 ]; then err "Пакетный менеджер не смог удалить $p (код $rc)."; return 1; fi
-  cleanup_artifacts "$p"
-  ok "Удалён: $p"
+remove_component() {
+  label="$1"; packages="$2"; detect="$3"
+  if ! component_detected "$detect"; then info "$label не обнаружен; пропуск."; return 0; fi
+  step "Удаление компонента: $label"
+  case "$detect" in
+    podkop|forkop|awg|zapret|zapret2|podkop-vpn-failover|luci-app-site-checker)
+      cleanup_artifacts "$detect"
+      ;;
+  esac
+  if ! component_remove_packages "$label" "$packages"; then
+    warn "$label: часть пакетов могла остаться. Проверьте вывод выше."
+    return 1
+  fi
+  # Clean component artefacts again in case package removal recreated service/config paths.
+  case "$detect" in
+    podkop|forkop|awg|zapret|zapret2|podkop-vpn-failover|luci-app-site-checker)
+      cleanup_artifacts "$detect"
+      ;;
+  esac
+  ok "$label обработан."
   return 0
 }
 
@@ -131,41 +161,41 @@ clear 2>/dev/null || true
 cat <<'BANNER'
 +----------------------------------------------------+
 |                  PACKETS DELETE                    |
-|        Удаление пакетов для OpenWrt                |
+| Удаление только компонентов Install Packets Script |
 +----------------------------------------------------+
 BANNER
 printf 'Роутер: %s\nOpenWrt: %s\nПакетный менеджер: %s\n\n' "$MODEL" "${RELEASE:-неизвестно}" "$PM"
-warn 'УДАЛИТЬ ВСЁ удаляет все незашищённые пакеты. Базовые компоненты, ядро, kmod-* и luci-i18n-base-ru защищены.'
+warn 'Системные пакеты OpenWrt не отображаются и не удаляются. Будут предложены только известные компоненты из install_packets_script.'
 
-PACKAGES_FILE="$TMP_DIR/packages.txt"
-SELECT_FILE="$TMP_DIR/selected.txt"
-list_installed > "$PACKAGES_FILE"
-[ -s "$PACKAGES_FILE" ] || { err 'Не удалось получить список установленных пакетов.'; exit 1; }
-
+printf 'Компоненты, обнаруженные на роутере:\n'
 INDEX=0
-while IFS= read -r package; do
-  [ -n "$package" ] || continue
-  INDEX=$((INDEX + 1))
-  if is_protected "$package"; then marker='[ЗАЩИЩЁН]'; else marker=''; fi
-  desc="$(pkg_description "$package")"
-  printf '%4d) %-40s %-11s %s\n' "$INDEX" "$package" "$marker" "$desc"
-done < "$PACKAGES_FILE"
-printf '\nВсего пакетов: %s\n\n' "$INDEX"
+: > "$TMP_DIR/detected.tsv"
+while IFS="$(printf '\t')" read -r label packages detect; do
+  [ -n "$label" ] || continue
+  if component_detected "$detect"; then
+    INDEX=$((INDEX + 1))
+    printf '%s\t%s\t%s\n' "$INDEX" "$label" "$detect" >> "$TMP_DIR/detected.tsv"
+    printf ' %2d) %s\n' "$INDEX" "$label"
+  fi
+done < "$COMPONENTS_FILE"
+
+if [ "$INDEX" -eq 0 ]; then
+  info 'Установленные компоненты из списка не обнаружены. Ничего удалять.'
+  exit 0
+fi
+
 cat <<'MENU'
+
 Выберите действие:
-  Введите номера пакетов через пробел или запятую (например: 4 7 12)
-  A) УДАЛИТЬ ВСЁ (все незашищённые пакеты)
+  Введите номера компонентов через пробел или запятую (например: 1 3)
+  A) Удалить ВСЕ обнаруженные компоненты из этого установщика
   Q) Выход без изменений
 MENU
-
 while :; do
   printf '\nВаш выбор: '
   if ! IFS= read -r CHOICE; then info 'Ввод завершён. Выход без изменений.'; exit 0; fi
   CHOICE="$(printf '%s' "$CHOICE" | tr '[:lower:]' '[:upper:]')"
-  case "$CHOICE" in
-    Q|QUIT|EXIT) info 'Выход без изменений.'; exit 0 ;;
-    A|ALL) break ;;
-  esac
+  case "$CHOICE" in Q|QUIT|EXIT) info 'Выход без изменений.'; exit 0 ;; A|ALL) break ;; esac
   TOKENS="$(printf '%s' "$CHOICE" | tr ',' ' ')"
   VALID=1; SEEN=0
   for t in $TOKENS; do
@@ -177,54 +207,43 @@ while :; do
   warn 'Некорректный выбор. Используйте номера из списка, A или Q.'
 done
 
-: > "$SELECT_FILE"
+: > "$TMP_DIR/selected.tsv"
 if [ "$CHOICE" = A ] || [ "$CHOICE" = ALL ]; then
-  while IFS= read -r package; do is_protected "$package" || printf '%s\n' "$package" >> "$SELECT_FILE"; done < "$PACKAGES_FILE"
+  cp "$TMP_DIR/detected.tsv" "$TMP_DIR/selected.tsv"
 else
-  for t in $TOKENS; do
-    package="$(sed -n "${t}p" "$PACKAGES_FILE")"
-    [ -n "$package" ] || continue
-    if is_protected "$package"; then warn "$package защищён и будет пропущен."; else printf '%s\n' "$package" >> "$SELECT_FILE"; fi
-  done
+  for t in $TOKENS; do sed -n "${t}p" "$TMP_DIR/detected.tsv" >> "$TMP_DIR/selected.tsv"; done
 fi
-sort -u "$SELECT_FILE" -o "$SELECT_FILE"
-[ -s "$SELECT_FILE" ] || { info 'Нет доступных для удаления пакетов.'; exit 0; }
 
-printf '\nПлан удаления:\n'
-while IFS= read -r package; do printf ' - %s\n' "$package"; done < "$SELECT_FILE"
+printf '\nПлан удаления компонентов:\n'
+while IFS="$(printf '\t')" read -r n label detect; do
+  printf ' - %s\n' "$label"
+  # Show exact package list, but do not imply every package is definitely installed.
+  while IFS="$(printf '\t')" read -r clabel packages cdetect; do
+    [ "$clabel" = "$label" ] || continue
+    for p in $packages; do pkg_installed "$p" && printf '     пакет: %s\n' "$p"; done
+  done < "$COMPONENTS_FILE"
+  [ "$detect" = zapret2-classic ] && printf '     сторонние файлы: /opt/zapret2 (отдельное подтверждение)
+'
+done < "$TMP_DIR/selected.tsv"
 printf '\nДля подтверждения введите DELETE: '
 IFS= read -r CONFIRM || CONFIRM=''
 [ "$CONFIRM" = DELETE ] || { info 'Удаление отменено.'; exit 0; }
 
-NEED_REBOOT=0
 FAILS=0
-REMOVED=0
-while IFS= read -r package; do
-  [ -n "$package" ] || continue
-  REBOOT_CANDIDATE=0
-  case "$package" in
-    kmod-*) REBOOT_CANDIDATE=1 ;;
-    wpad-*|hostapd|netifd|firewall4|firewall3|odhcpd-ipv6only|odhcpd|dnsmasq|procd|busybox|base-files|libc|libgcc)
-      REBOOT_CANDIDATE=1 ;;
-  esac
-  if remove_one "$package"; then
-    REMOVED=$((REMOVED + 1))
-    [ "$REBOOT_CANDIDATE" != 1 ] || NEED_REBOOT=1
-  else
-    rc=$?; [ "$rc" -eq 2 ] || FAILS=$((FAILS + 1))
-  fi
-done < "$SELECT_FILE"
+DONE=0
+while IFS="$(printf '\t')" read -r n label detect; do
+  packages=''
+  while IFS="$(printf '\t')" read -r clabel cpkg cdetect; do
+    if [ "$clabel" = "$label" ]; then packages="$cpkg"; break; fi
+  done < "$COMPONENTS_FILE"
+  if remove_component "$label" "$packages" "$detect"; then DONE=$((DONE + 1)); else FAILS=$((FAILS + 1)); fi
+done < "$TMP_DIR/selected.tsv"
 
-step 'Очистка кеша и временных файлов'
-cleanup_package_caches
-ok 'Кеш пакетного менеджера очищен.'
-printf '\nИТОГ: успешно обработано пакетов: %s; ошибок: %s.\n' "$REMOVED" "$FAILS"
-if [ "$NEED_REBOOT" -eq 1 ]; then
-  warn 'В выбранном списке были kernel/kmod-пакеты; обычно они защищены, но проверьте сообщения пакетного менеджера. Перезагрузка может потребоваться.'
-  printf 'Перезагрузить роутер сейчас? [y/N]: '
-  IFS= read -r REBOOT_CHOICE || REBOOT_CHOICE=''
-  case "$REBOOT_CHOICE" in y|Y|yes|YES|д|Д|да|ДА) sync; reboot ;; *) info 'Перезагрузка пропущена.' ;; esac
-else
-  info 'Перезагрузка не требуется: ядро и kernel modules не удалялись.'
+step 'Очистка временных файлов'
+if [ "$PM" = apk ]; then apk cache clean >/dev/null 2>&1 || true; rm -rf /var/cache/apk/* 2>/dev/null || true
+else rm -rf /tmp/opkg-lists/* 2>/dev/null || true; rm -f /tmp/opkg-*.ipk 2>/dev/null || true
 fi
+ok 'Очистка кэша выполнена.'
+printf '\nИТОГ: обработано компонентов: %s; ошибок: %s.\n' "$DONE" "$FAILS"
+info 'Системные пакеты OpenWrt не выбирались для удаления.'
 exit "$FAILS"
