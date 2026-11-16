@@ -6,4 +6,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check shell syntax
-        run: sh -n delete-packets.sh
+        run: sh -n delete_packets_script.sh
+
